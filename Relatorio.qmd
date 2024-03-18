@@ -1,0 +1,242 @@
+---
+title: "Produtividade de Soja"
+format: pdf
+editor: visual
+---
+
+## Produtividade de Soja em Latossolo e Plintossolo
+
+Projeto em desenviolvimento com o objetivo de estudar a produtividade de soja nos solos do tipo Plintossolo em comparação com o solo de maior produtividade Latossolo. As covariáveis disponíveis para estudo são: Ano de plantio, Local, Genotipo (Cultivar), Solo, Bloco de plantio e a Produtividade de soja em kg/ha.
+
+## Tratamento dos dados
+
+Nesta sessão são executados os códigos para carregamento e tratamento dos dados de Produtividade de Soja:
+
+```{r}
+#| include: false
+
+library(readxl)
+library(tidyverse)
+
+# lendo o conjunto de dados
+soja_produtiv <- read_excel("Dados - Produtividade em Latossolo e Plintossolo - 2018 a 2022 (1).xlsx")
+
+# renomeando as colunas do dataframe
+colu_names <- as.character(soja_produtiv[2,])
+colu_names[c(4,30)] <- c("Cult", "kgha")
+colnames(soja_produtiv) <- colu_names
+
+# criando um novo dataframe e removendo as linhas de comentários e de nome de colunas
+soja_df <- soja_produtiv[-c(1,2),]
+# renomeando colunas duplicadas e removendo as que tem NA
+soja_df <- soja_df %>% 
+  setNames(make.unique(names(.))) %>% 
+  select(where(~any(!is.na(.))))
+
+# colocando sufixo em todas colunas de nomes iguais
+colu_names <- names(soja_df)
+colu_names[1:6] <- paste0(colu_names[1:6], ".0")
+
+# renomeando as colunas do soja_df
+colnames(soja_df) <- colu_names
+
+# criando o dataframe longo
+dados_soja <- soja_df %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c(".value", "id"),
+    names_pattern = "(\\w+)\\.(\\d+)"
+  )
+
+# contando e removendo linhas com NA
+sum(!complete.cases(dados_soja)) #591 NA
+dados_soja <- na.omit(dados_soja)
+
+dados_soja <- dados_soja %>% 
+# transformando as covariaveis numericas
+  mutate_at(vars(id, Ano, Bloco, kgha), as.numeric) %>% 
+# alterando os Latossolos 1 e 2 para apenas Latossolos
+  mutate(Solo = ifelse(Solo != "Plintossolo", "Latossolo", "Plintossolo")) %>%
+# removendo acentos dos valores das covariaveis Local e Cult
+  mutate(Local = stringi::stri_trans_general(Local, "Latin-ASCII")) %>% 
+  mutate(Cult = stringi::stri_trans_general(Cult, "Latin-ASCII"))
+
+
+# alterando um valor que pode ter sido digitado errado
+dados_soja <- dados_soja %>% 
+  mutate(Cult = ifelse(Cult == "BRS8680IPRO", "BRS8680", Cult))
+
+```
+
+```{r}
+#| echo: false
+
+head(dados_soja)
+```
+
+## Análise Descritiva
+
+Nesta sessão o objetivo é estudar o comportamento dos dados a fim de se obter os primeiros insights sobre o problema e as possíveis soluções, o conjunto de dados em estudo conta com 6 covariáveis e 801 observações distribuidas ao longo de 4 anos de plantios e em dois tipos de solo, que é a característica principal em estudo.
+
+O estudo é desbalanceado no tempo visto que não se tem a mesma quantidade de observações nos 4 diferentes anos de plantio, e o mesmo desbalanceamento é observado no Local de plantio da soja disponível no conjunto de dados.
+
+```{r}
+#| include: false
+
+attach(dados_soja)
+
+# estudando a quantidade de observações
+table(Ano) # estudo desbalanceado no tempo
+table(Solo)
+range(table(Cult))
+table(Local) # estudo desbalanceado no espaço?
+
+
+```
+
+O primeiro gráfico exibido a seguir é o gráfico de Violino que apresenta a densidade da produtividade de Soja em kg/ha distribuida por Ano de plantio, e a primeira característica desse gráfico que chama atenção e que foi evidenciado anteriormente, são os tamanhos amostrais diferentes por Ano, 2022 foi o ano de plantio com menor observações no conjunto de dados e 2018 foi o ano com maior quantidade de observações no conjunto de dados.
+
+Apesar disso, 2018 apresentou a menor produtividade em kg/ha se comparada com os outros 3 anos em estudo, sendo 2021 o ano com observações com maiores valores de produtividade em kg/ha.
+
+```{r}
+#| echo: false
+#| warning: false
+
+##### Gráfico da Densidade da produção de Soja por ANO #####
+# sample size
+sample_size = dados_soja %>% group_by(Ano) %>% summarize(num=n())
+
+# Plot
+dados_soja %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(Ano, "\n", "n=", num)) %>%
+  ggplot(aes(x=myaxis, y=kgha, fill=Ano)) +
+  geom_violin(width=1.4) +
+  # scale_fill_viridis(discrete = TRUE) +
+  # theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("Densidade da produtividade de Soja por Ano") +
+  xlab("") + ylab("Produtividade em kg/ha")
+
+
+```
+
+O segundo gráfico apresentado a seguir exibe o gráfico de violino das interações de Ano de plantio e tipo de Solo, visto que a partir da covariável de Ano pode-se posteriormente ser criada uma covariável climática, para se estudar novos fatores que têm impacto na produtividade de Soja no Plintossolo.
+
+```{r}
+#| echo: false
+#| warning: false
+
+
+##### Gráfico da Densidade da produção de Soja por ANO e SOLO #####
+# sample size
+sample_size = dados_soja %>% group_by(Ano, Solo) %>% summarize(num=n())
+
+# Plot
+dados_soja %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(Ano, "\n", Solo, "\n", "n=", num)) %>%
+  ggplot(aes(x=myaxis, y=kgha)) +
+  geom_violin(width=1.4, aes(fill = Solo)) +
+  # scale_fill_viridis(discrete = TRUE) +
+  # theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("Densidade da produtividade de Soja por Solo") +
+  xlab("") + ylab("Produtividade em kg/ha")
+
+```
+
+O terceiro gráfico exibido a seguir apresenta os gráficos de violino da Densidade da produtividade de Soja por Local de plantio, e assim como no caso da covariável de ano, nesta é observado que os tamanhos amostrais por local de plantio são desbalanceados, com Goiânia apresentando a menor quantidade de observações e Paraiso do Tocantins com a maior quantidade de observações.
+
+Além disso, apenas em Paraiso do Tocantins foram observadas a produtividade de Soja nos dois tipos de Solo (Latossolo e Plintossolo), e apesar de Goiânia apresentar poucas observações têm alta produtividade (o tipo de Solo é o Latossolo que é o ideal para agricultura) assim como Paraiso do Tocantins apresentou alta produtividade.
+
+```{r}
+#| echo: false
+#| warning: false
+
+##### Gráfico da Densidade da produção de Soja por LOCAL #####
+# sample size
+sample_size = dados_soja %>% group_by(Local) %>% summarize(num=n())
+
+# Plot
+dados_soja %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(Local, "\n", "n=", num)) %>%
+  ggplot(aes(x=myaxis, y=kgha, fill=Local)) +
+  geom_violin(width=1.4) +
+  # scale_fill_viridis(discrete = TRUE) +
+  # theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("Densidade da produtividade de Soja por Local") +
+  xlab("") + ylab("Produtividade em kg/ha")
+
+```
+
+O quarto gráfico a seguir apresenta o Violino das interações de Local de Plantio e tipo de Solo, visto que o Local é a covariável que posteriormente pode auxiliar na identificação das coordenadas de plantio e das demais características da região, fatores que podem ter impacto na produtividade de Soja no Plintossolo.
+
+```{r}
+#| echo: false
+#| warning: false
+
+
+##### Gráfico da Densidade da produção de Soja por ANO e SOLO #####
+# sample size
+sample_size = dados_soja %>% group_by(Local, Solo) %>% summarize(num=n())
+
+# Plot
+dados_soja %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(Local, "\n", Solo, "\n", "n=", num)) %>%
+  ggplot(aes(x=myaxis, y=kgha)) +
+  geom_violin(width=1.4, aes(fill = Solo)) +
+  # scale_fill_viridis(discrete = TRUE) +
+  # theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("Densidade da produtividade de Soja por Solo") +
+  xlab("") + ylab("Produtividade em kg/ha")
+
+table(Local, Solo)
+```
+
+O quinto gráfico apresentado a seguir exibe o gráfico de violino das interações de Ano de plantio, Local de plantio e tipo de Solo. Como a visualização gráfica fica comprimetida, uma tabela das interações é exibida abaixo.
+
+```{r}
+
+#| include: false
+#| warning: false
+
+
+##### Gráfico da Densidade da produção de Soja por ANO e SOLO #####
+# sample size
+sample_size = dados_soja %>% group_by(Ano, Local, Solo) %>% summarize(num=n())
+
+# Plot
+dados_soja %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(Ano, "\n", Local, "\n", Solo, "\n", "n=", num)) %>%
+  ggplot(aes(x=myaxis, y=kgha)) +
+  geom_violin(width=1.4, aes(fill = Solo)) +
+  # scale_fill_viridis(discrete = TRUE) +
+  # theme_ipsum() +
+  theme(
+    legend.position="none",
+    plot.title = element_text(size=11)
+  ) +
+  ggtitle("Densidade da produtividade de Soja por Solo") +
+  xlab("") + ylab("Produtividade em kg/ha")
+
+table(Local, Ano, Solo)
+
+```
